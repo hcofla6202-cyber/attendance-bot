@@ -1,3 +1,14 @@
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => {
+  res.send('봇 살아있다');
+});
+
+app.listen(3000, () => {
+  console.log('웹서버 실행됨');
+});
+
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 const cron = require('node-cron');
