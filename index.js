@@ -22,6 +22,8 @@ const client = new Client({
 const TOKEN = process.env.TOKEN;
 const FILE_NAME = 'attendance.json';
 
+console.log('TOKEN 존재 여부:', !!TOKEN);
+
 let attendance = {};
 if (fs.existsSync(FILE_NAME)) {
   attendance = JSON.parse(fs.readFileSync(FILE_NAME, 'utf8'));
@@ -187,4 +189,14 @@ process.on('unhandledRejection', (err) => {
   console.error('Promise 에러:', err);
 });
 
-client.login(TOKEN);
+process.on('uncaughtException', (err) => {
+  console.error('치명적 에러:', err);
+});
+
+client.login(TOKEN)
+  .then(() => {
+    console.log('client.login 호출 성공');
+  })
+  .catch((err) => {
+    console.error('client.login 실패:', err);
+  });
