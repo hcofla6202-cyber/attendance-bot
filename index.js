@@ -26,7 +26,12 @@ console.log('TOKEN 존재 여부:', !!TOKEN);
 
 let attendance = {};
 if (fs.existsSync(FILE_NAME)) {
-  attendance = JSON.parse(fs.readFileSync(FILE_NAME, 'utf8'));
+  try {
+    attendance = JSON.parse(fs.readFileSync(FILE_NAME, 'utf8'));
+  } catch (err) {
+    console.error('attendance.json 읽기 실패:', err);
+    attendance = {};
+  }
 }
 
 function saveAttendance() {
@@ -122,6 +127,38 @@ function buildTotalRanking(guildId) {
   ].join('\n');
 }
 
+client.on('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+client.on('error', (err) => {
+  console.error('디스코드 클라이언트 에러:', err);
+});
+
+client.on('warn', (info) => {
+  console.warn('디스코드 경고:', info);
+});
+
+client.on('shardError', (err) => {
+  console.error('샤드 에러:', err);
+});
+
+client.on('shardDisconnect', (event, id) => {
+  console.error(`샤드 연결 끊김: shard ${id}`, event);
+});
+
+client.on('shardReconnecting', (id) => {
+  console.warn(`샤드 재연결 중: shard ${id}`);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Promise 에러:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('치명적 에러:', err);
+});
+
 client.on('messageCreate', (message) => {
   if (message.author.bot || !message.guild) return;
 
@@ -177,22 +214,7 @@ cron.schedule('59 23 * * 0', async () => {
   timezone: 'Asia/Seoul'
 });
 
-client.on('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
-});
-
-client.on('error', (err) => {
-  console.error('디스코드 클라이언트 에러:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Promise 에러:', err);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('치명적 에러:', err);
-});
-
+console.log('디스코드 로그인 시도 시작');
 client.login(TOKEN)
   .then(() => {
     console.log('client.login 호출 성공');
