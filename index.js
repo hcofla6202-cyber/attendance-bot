@@ -3,14 +3,22 @@ const fs = require('fs');
 const cron = require('node-cron');
 const express = require('express');
 
+// --------------------
+// Render용 웹서버
+// --------------------
 const app = express();
+
 app.get('/', (req, res) => {
   res.send('봇 살아있음');
 });
+
 app.listen(process.env.PORT || 3000, () => {
   console.log('웹서버 실행됨');
 });
 
+// --------------------
+// 디스코드 봇
+// --------------------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -19,11 +27,20 @@ const client = new Client({
   ]
 });
 
-const TOKEN = process.env.TOKEN;
+// 따옴표/공백/줄바꿈 방지
+const TOKEN = (process.env.TOKEN || '')
+  .trim()
+  .replace(/^"(.*)"$/, '$1')
+  .replace(/^'(.*)'$/, '$1');
+
 const FILE_NAME = 'attendance.json';
 
 console.log('TOKEN 존재 여부:', !!TOKEN);
+console.log('TOKEN 길이:', TOKEN.length);
 
+// --------------------
+// 데이터 불러오기 / 저장
+// --------------------
 let attendance = {};
 if (fs.existsSync(FILE_NAME)) {
   try {
@@ -38,12 +55,15 @@ function saveAttendance() {
   fs.writeFileSync(FILE_NAME, JSON.stringify(attendance, null, 2), 'utf8');
 }
 
-function formatDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
+// --------------------
+// 날짜 함수 (한국 시간)
+// --------------------
 function getKSTNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+}
+
+function formatDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function getTodayKST() {
@@ -52,7 +72,7 @@ function getTodayKST() {
 
 function getWeekDatesKST() {
   const now = getKSTNow();
-  const day = now.getDay();
+  const day = now.getDay(); // 일=0, 월=1, ... 토=6
   const diff = day === 0 ? -6 : 1 - day;
 
   const monday = new Date(now);
@@ -65,9 +85,13 @@ function getWeekDatesKST() {
     d.setDate(monday.getDate() + i);
     days.push(formatDate(d));
   }
-  return days;
+
+  return days; // 월~일
 }
 
+// --------------------
+// 이번주 출석표
+// --------------------
 function buildWeeklySummary(guildId) {
   if (!attendance[guildId]) return '이번 주 출석 기록이 없어 😢';
 
@@ -76,7 +100,9 @@ function buildWeeklySummary(guildId) {
 
   for (const userId in attendance[guildId]) {
     const user = attendance[guildId][userId];
-    const marks = week.map(d => user.dates.includes(d) ? '✅' : '❌');
+    const dates = Array.isArray(user.dates) ? user.dates : [];
+
+    const marks = week.map(d => dates.includes(d) ? '✅' : '❌');
     const count = marks.filter(v => v === '✅').length;
 
     if (count > 0) {
@@ -101,6 +127,9 @@ function buildWeeklySummary(guildId) {
   ].join('\n');
 }
 
+// --------------------
+// 누적 랭킹
+// --------------------
 function buildTotalRanking(guildId) {
   if (!attendance[guildId]) return '출석 기록이 없어 😢';
 
@@ -108,9 +137,11 @@ function buildTotalRanking(guildId) {
 
   for (const userId in attendance[guildId]) {
     const user = attendance[guildId][userId];
+    const count = Array.isArray(user.dates) ? user.dates.length : 0;
+
     results.push({
       name: user.name,
-      count: user.dates.length
+      count
     });
   }
 
@@ -127,6 +158,84 @@ function buildTotalRanking(guildId) {
   ].join('\n');
 }
 
+// --------------------
+// 메시지 처리
+// --------------------
+client.on('messageCreate', (message) => {
+  if (message.author.bot) return;
+  if (!message.guild) return;
+
+  const guildId = message.guild.id;
+  const userId = message.author.id;
+  const today = getTodayKST();
+  const name = message.member?.displayName || message.author.username;
+
+  if (!attendance[guildId]) {
+    attendance[guildId] = {};
+  }
+
+  // 출석
+  if (message.content === '출석') {
+    if (!attendance[guildId][userId]) {
+      attendance[guildId][userId] = {
+        name,
+        dates: []
+      };
+    }
+
+    attendance[guildId][userId].name = name;
+
+    if (attendance[guildId][userId].dates.includes(today)) {
+      message.reply('이미 출석했어 😎');
+      return;
+    }
+
+    attendance[guildId][userId].dates.push(today);
+    saveAttendance();
+    message.reply('출석 완료 ✅');
+    return;
+  }
+
+  // 출석확인
+  if (message.content === '출석확인') {
+    if (
+      !attendance[guildId][userId] ||
+      !attendance[guildId][userId].dates ||
+      attendance[guildId][userId].dates.length === 0
+    ) {
+      message.reply('출석 기록이 없어 😢');
+      return;
+    }
+
+    message.reply(`총 출석 횟수: ${attendance[guildId][userId].dates.length}일`);
+    return;
+  }
+
+  // 이번주출석
+  if (message.content === '이번주출석') {
+    message.channel.send(buildWeeklySummary(guildId));
+    return;
+  }
+
+  // 랭킹
+  if (message.content === '랭킹') {
+    message.channel.send(buildTotalRanking(guildId));
+    return;
+  }
+});
+
+// --------------------
+// 매주 일요일 23:59 자동 안내
+// --------------------
+cron.schedule('59 23 * * 0', async () => {
+  console.log('주간 출석표 스케줄 실행');
+}, {
+  timezone: 'Asia/Seoul'
+});
+
+// --------------------
+// 디버그 로그
+// --------------------
 client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
@@ -159,62 +268,15 @@ process.on('uncaughtException', (err) => {
   console.error('치명적 에러:', err);
 });
 
-client.on('messageCreate', (message) => {
-  if (message.author.bot || !message.guild) return;
-
-  const guildId = message.guild.id;
-  const userId = message.author.id;
-  const today = getTodayKST();
-  const name = message.member?.displayName || message.author.username;
-
-  if (!attendance[guildId]) attendance[guildId] = {};
-
-  if (message.content === '출석') {
-    if (!attendance[guildId][userId]) {
-      attendance[guildId][userId] = { name, dates: [] };
-    }
-
-    attendance[guildId][userId].name = name;
-
-    if (attendance[guildId][userId].dates.includes(today)) {
-      message.reply('이미 출석했어 😎');
-      return;
-    }
-
-    attendance[guildId][userId].dates.push(today);
-    saveAttendance();
-    message.reply('출석 완료 ✅');
-    return;
-  }
-
-  if (message.content === '출석확인') {
-    if (!attendance[guildId][userId]) {
-      message.reply('출석 기록이 없어 😢');
-      return;
-    }
-
-    message.reply(`총 출석 횟수: ${attendance[guildId][userId].dates.length}일`);
-    return;
-  }
-
-  if (message.content === '이번주출석') {
-    message.channel.send(buildWeeklySummary(guildId));
-    return;
-  }
-
-  if (message.content === '랭킹') {
-    message.channel.send(buildTotalRanking(guildId));
-    return;
-  }
-});
-
-cron.schedule('59 23 * * 0', async () => {
-  console.log('주간 출석표 스케줄 실행');
-}, {
-  timezone: 'Asia/Seoul'
-});
-
+// --------------------
+// 로그인
+// --------------------
 console.log('디스코드 로그인 시도 시작');
+
+setTimeout(() => {
+  console.log('로그인 15초째 대기중');
+}, 15000);
+
 client.login(TOKEN)
   .then(() => {
     console.log('client.login 호출 성공');
